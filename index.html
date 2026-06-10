@@ -1,0 +1,1210 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>空間特工 · KOL / KOC 審核管理</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.2.0",
+    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client?deps=react@18.2.0",
+    "lucide-react": "https://esm.sh/lucide-react@0.257.0?deps=react@18.2.0"
+  }
+}
+</script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>html,body,#root{height:100%}</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-type="module" data-presets="react">
+import React, { useState, useEffect } from "react";
+import { createRoot } from "react-dom/client";
+import {
+  Users, Star, Send, BarChart3, History, Plus, X, Check, AlertTriangle,
+  Trash2, ExternalLink, Search, ChevronRight, Loader2, Package,
+  TrendingUp, Calculator, FileText, RotateCcw, Sparkles, ClipboardList, ShieldCheck,
+} from "lucide-react";
+
+/* ============================================================
+   品牌色票 — 乾淨的白 / 灰 / 深藍（Blue Fusion 質感藍）
+   標籤採用莫蘭迪低彩度色系
+   ============================================================ */
+const C = {
+  navy: "#2A3F5F",
+  navyDark: "#1F3047",
+  blue: "#3D5A80",
+  blueSoft: "#EAEFF6",
+  ink: "#1F2937",
+  sub: "#64748B",
+  line: "#E4E8EE",
+  bg: "#F5F7FA",
+  card: "#FFFFFF",
+};
+
+/* 狀態流轉順序 */
+const FLOW = ["發現名單", "審核評分", "接洽合作", "發布追蹤", "成效回收", "再開發"];
+
+/* 莫蘭迪狀態標籤色 */
+const STATUS_TAG = {
+  發現名單: { bg: "#E8ECEF", fg: "#566273" },
+  審核評分: { bg: "#E6E1EC", fg: "#6B5B7B" },
+  接洽合作: { bg: "#DCE8E4", fg: "#4A6B61" },
+  發布追蹤: { bg: "#EFE7D8", fg: "#86703F" },
+  成效回收: { bg: "#ECDFDF", fg: "#7B5757" },
+  再開發: { bg: "#E2E9DE", fg: "#5C6B50" },
+};
+
+/* 評分等級標籤色 */
+const GRADE_TAG = {
+  優先合作: { bg: "#D7E6D7", fg: "#456B45" },
+  可合作: { bg: "#DBE4EF", fg: "#3D5A80" },
+  可觀察: { bg: "#EFE8D2", fg: "#8A7236" },
+  不建議: { bg: "#E5E5E5", fg: "#76797E" },
+};
+
+/* ============================================================
+   操作人員與權限區分
+   ============================================================ */
+const USERS = {
+  林佩珊: { role: "管理員", perms: { add: true, review: true, track: true, perf: true, delete: true } },
+  王建宏: { role: "專案負責人", perms: { add: true, review: true, track: true, perf: true, delete: false } },
+  陳冠霖: { role: "協作執行", perms: { add: false, review: false, track: true, perf: true, delete: false } },
+};
+const PERM_LABEL = { add: "新增名單", review: "審核評分", track: "合作追蹤", perf: "成效回填", delete: "刪除名單" };
+
+/* 8 大評估維度 */
+const DIMENSIONS = [
+  { key: "relevance", label: "內容相關性", hint: "居家、收納、租屋、親子、辦公" },
+  { key: "audience", label: "受眾吻合度", hint: "是否接近空間特工潛在客群" },
+  { key: "quality", label: "內容品質", hint: "照片、影片、文案是否可再利用" },
+  { key: "naturalness", label: "業配自然度", hint: "過往合作是否真實、不生硬" },
+  { key: "interaction", label: "互動品質", hint: "留言是否自然、互動是否異常" },
+  { key: "cost", label: "合作成本", hint: "報價、互惠可能性、投入成本" },
+  { key: "risk", label: "品牌風險", hint: "爭議、敏感議題、負面紀錄" },
+  { key: "cooperation", label: "配合度", hint: "溝通速度、規範遵守、交件穩定" },
+];
+
+/* ============================================================
+   依平台顯示不同的成效欄位
+   base = 觸及/曝光類分母；clicks = 點擊；engage = 互動分子；sales = 成交
+   req 為必填（折扣碼成交金額不必填）
+   ============================================================ */
+const PLATFORM_PERF = {
+  Instagram: {
+    fields: [
+      { key: "reach", label: "觸及人數", req: true },
+      { key: "engagement", label: "互動數", hint: "讚 + 留言 + 分享 + 收藏" },
+      { key: "saves", label: "儲存數" },
+      { key: "clicks", label: "連結點擊", req: true },
+      { key: "sales", label: "折扣碼成交金額", money: true },
+    ],
+    base: "reach", clicks: "clicks", engage: "engagement", sales: "sales", baseLabel: "觸及",
+  },
+  YouTube: {
+    fields: [
+      { key: "views", label: "觀看次數", req: true },
+      { key: "avgView", label: "平均觀看時長（秒）" },
+      { key: "likes", label: "按讚數" },
+      { key: "comments", label: "留言數" },
+      { key: "clicks", label: "說明欄點擊", req: true },
+      { key: "sales", label: "折扣碼成交金額", money: true },
+    ],
+    base: "views", clicks: "clicks", engage: "likes", sales: "sales", baseLabel: "觀看",
+  },
+  Facebook: {
+    fields: [
+      { key: "reach", label: "觸及人數", req: true },
+      { key: "engagement", label: "互動數" },
+      { key: "shares", label: "分享數" },
+      { key: "clicks", label: "連結點擊", req: true },
+      { key: "sales", label: "折扣碼成交金額", money: true },
+    ],
+    base: "reach", clicks: "clicks", engage: "engagement", sales: "sales", baseLabel: "觸及",
+  },
+  TikTok: {
+    fields: [
+      { key: "plays", label: "播放次數", req: true },
+      { key: "likes", label: "按讚數" },
+      { key: "shares", label: "分享數" },
+      { key: "completion", label: "完播率（%）" },
+      { key: "clicks", label: "點擊數", req: true },
+      { key: "sales", label: "折扣碼成交金額", money: true },
+    ],
+    base: "plays", clicks: "clicks", engage: "likes", sales: "sales", baseLabel: "播放",
+  },
+  Threads: {
+    fields: [
+      { key: "views", label: "瀏覽數", req: true },
+      { key: "engagement", label: "互動數" },
+      { key: "reposts", label: "轉發數" },
+      { key: "clicks", label: "點擊數", req: true },
+      { key: "sales", label: "折扣碼成交金額", money: true },
+    ],
+    base: "views", clicks: "clicks", engage: "engagement", sales: "sales", baseLabel: "瀏覽",
+  },
+  部落格: {
+    fields: [
+      { key: "pv", label: "瀏覽量 PV", req: true },
+      { key: "avgTime", label: "平均停留（秒）" },
+      { key: "clicks", label: "導購點擊", req: true },
+      { key: "sales", label: "折扣碼成交金額", money: true },
+    ],
+    base: "pv", clicks: "clicks", engage: null, sales: "sales", baseLabel: "瀏覽量",
+  },
+};
+const perfCfg = (platform) => PLATFORM_PERF[platform] || PLATFORM_PERF.Instagram;
+
+const now = () =>
+  new Date().toLocaleString("zh-TW", {
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit",
+  });
+
+const gradeFromScore = (total) => {
+  if (total >= 32) return "優先合作";
+  if (total >= 25) return "可合作";
+  if (total >= 18) return "可觀察";
+  return "不建議";
+};
+
+const sumScores = (s) =>
+  s ? DIMENSIONS.reduce((a, d) => a + (s[d.key] || 0), 0) : 0;
+
+/* ============================================================
+   預設測試資料 — 空間特工品牌調性
+   ============================================================ */
+const SEED = [
+  {
+    id: "KOL-2026-0001", name: "收納小姐姐 Amber", platform: "Instagram",
+    url: "https://instagram.com/amber.tidy", status: "審核評分",
+    owner: "林佩珊", product: "系統收納櫃 SC-200",
+    scores: { relevance: 5, audience: 5, quality: 4, naturalness: 4, interaction: 5, cost: 4, risk: 5, cooperation: 5 },
+    tracking: {}, perf: {},
+    history: [
+      { time: "2026/05/28 10:12", person: "林佩珊", text: "建立名單，來源：IG 收納標籤探索" },
+      { time: "2026/05/30 14:40", person: "林佩珊", text: "狀態變更：發現名單 → 審核評分" },
+    ],
+  },
+  {
+    id: "KOL-2026-0002", name: "租屋改造王 阿宏", platform: "YouTube",
+    url: "https://youtube.com/@renohong", status: "接洽合作",
+    owner: "王建宏", product: "模組化層架 ML-Flex",
+    scores: { relevance: 4, audience: 4, quality: 5, naturalness: 3, interaction: 4, cost: 3, risk: 4, cooperation: 4 },
+    tracking: {}, perf: {},
+    history: [
+      { time: "2026/05/20 09:00", person: "王建宏", text: "建立名單，來源：YouTube 租屋改造系列" },
+      { time: "2026/05/22 16:20", person: "王建宏", text: "狀態變更：發現名單 → 審核評分" },
+      { time: "2026/05/26 11:05", person: "王建宏", text: "狀態變更：審核評分 → 接洽合作" },
+    ],
+  },
+  {
+    id: "KOL-2026-0003", name: "小宅生活誌", platform: "Instagram",
+    url: "https://instagram.com/tinyhome.diary", status: "發現名單",
+    owner: "林佩珊", product: "",
+    scores: null, tracking: {}, perf: {},
+    history: [
+      { time: "2026/06/05 13:30", person: "林佩珊", text: "建立名單，來源：合作夥伴推薦" },
+    ],
+  },
+  {
+    id: "KOL-2026-0004", name: "親子居家日常 Mia", platform: "Facebook",
+    url: "https://facebook.com/mia.familyhome", status: "成效回收",
+    owner: "陳冠霖", product: "兒童收納系統 KidStore",
+    scores: { relevance: 5, audience: 4, quality: 4, naturalness: 4, interaction: 4, cost: 4, risk: 5, cooperation: 5 },
+    tracking: { shipping: "已寄送（黑貓 6512-xxxx）", publishUrl: "https://facebook.com/mia.familyhome/posts/889", task: "開箱貼文 + 限時動態", reminder: "" },
+    perf: { reach: "42800", engagement: "3120", shares: "210", clicks: "560", sales: "28600", cost: "12000" },
+    history: [
+      { time: "2026/04/10 10:00", person: "陳冠霖", text: "建立名單，來源：親子社群" },
+      { time: "2026/04/14 15:00", person: "陳冠霖", text: "狀態變更：審核評分 → 接洽合作" },
+      { time: "2026/04/20 09:30", person: "陳冠霖", text: "狀態變更：接洽合作 → 發布追蹤" },
+      { time: "2026/05/02 18:10", person: "陳冠霖", text: "狀態變更：發布追蹤 → 成效回收" },
+    ],
+  },
+  {
+    id: "KOL-2026-0005", name: "極簡辦公室 Leo", platform: "YouTube",
+    url: "https://youtube.com/@leo.minimal", status: "發布追蹤",
+    owner: "王建宏", product: "升降桌 + 桌面收納組",
+    scores: { relevance: 4, audience: 5, quality: 5, naturalness: 4, interaction: 3, cost: 3, risk: 5, cooperation: 4 },
+    tracking: { shipping: "備貨中", publishUrl: "", task: "桌面 Setup 影片", reminder: "6/15 前提醒回填連結" },
+    perf: {},
+    history: [
+      { time: "2026/05/12 11:00", person: "王建宏", text: "建立名單，來源：辦公桌 Setup 社群" },
+      { time: "2026/05/16 14:20", person: "王建宏", text: "狀態變更：審核評分 → 接洽合作" },
+      { time: "2026/05/24 10:00", person: "王建宏", text: "狀態變更：接洽合作 → 發布追蹤" },
+    ],
+  },
+];
+
+/* ============================================================
+   localStorage 自動存檔
+   ============================================================ */
+const STORE_KEY = "kol-manager-v1";
+function loadKols() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length) return parsed;
+    }
+  } catch (e) {}
+  return SEED;
+}
+
+/* ============================================================
+   小元件
+   ============================================================ */
+function Tag({ palette, children }) {
+  return (
+    <span
+      className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium whitespace-nowrap"
+      style={{ background: palette.bg, color: palette.fg }}
+    >
+      {children}
+    </span>
+  );
+}
+
+function StatusTag({ status }) {
+  return <Tag palette={STATUS_TAG[status] || STATUS_TAG["發現名單"]}>{status}</Tag>;
+}
+
+function GradeTag({ grade }) {
+  if (!grade) return <span className="text-xs" style={{ color: C.sub }}>未評分</span>;
+  return <Tag palette={GRADE_TAG[grade]}>{grade}</Tag>;
+}
+
+/* 主色調按鈕（單一主按鈕原則 + 防重複送出） */
+function PrimaryButton({ children, onClick, disabled, loading, icon: Icon }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled || loading}
+      className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold text-white transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+      style={{
+        background: disabled ? "#C2CAD6" : C.navy,
+        cursor: disabled || loading ? "not-allowed" : "pointer",
+      }}
+    >
+      {loading ? <Loader2 size={16} className="animate-spin" /> : Icon ? <Icon size={16} /> : null}
+      {loading ? "處理中…" : children}
+    </button>
+  );
+}
+
+function GhostButton({ children, onClick, icon: Icon, tone = "default", disabled }) {
+  const colors =
+    tone === "danger"
+      ? { fg: "#9B4A4A", border: "#E3C9C9", bg: "#FCF6F6" }
+      : { fg: C.blue, border: C.line, bg: "#FFFFFF" };
+  return (
+    <button
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
+      className="inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium transition-colors hover:opacity-80 focus:outline-none focus-visible:ring-2"
+      style={{
+        color: colors.fg, borderColor: colors.border, background: colors.bg,
+        opacity: disabled ? 0.45 : 1, cursor: disabled ? "not-allowed" : "pointer",
+      }}
+    >
+      {Icon && <Icon size={15} />}
+      {children}
+    </button>
+  );
+}
+
+function Field({ label, required, children, hint }) {
+  return (
+    <label className="block">
+      <span className="mb-1.5 block text-sm font-medium" style={{ color: C.ink }}>
+        {label} {required && <span style={{ color: "#C2554F" }}>*</span>}
+      </span>
+      {children}
+      {hint && <span className="mt-1 block text-xs" style={{ color: C.sub }}>{hint}</span>}
+    </label>
+  );
+}
+
+const inputCls =
+  "w-full rounded-lg border bg-white px-3 py-2 text-sm outline-none transition-colors focus:border-slate-400";
+
+function PermHint({ show, children }) {
+  if (!show) return null;
+  return <span className="text-xs" style={{ color: "#B0764B" }}>{children}</span>;
+}
+
+/* ============================================================
+   主應用程式
+   ============================================================ */
+function KolManager() {
+  const [tab, setTab] = useState("list");
+  const [kols, setKols] = useState(loadKols);
+  const [selectedId, setSelectedId] = useState(() => loadKols()[0].id);
+  const [toasts, setToasts] = useState([]);
+  const [confirmBox, setConfirmBox] = useState(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [currentUser, setCurrentUser] = useState("林佩珊");
+
+  useEffect(() => {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(kols)); } catch (e) {}
+  }, [kols]);
+
+  const me = USERS[currentUser];
+  const perms = me.perms;
+  const selected = kols.find((k) => k.id === selectedId) || kols[0];
+
+  const pushToast = (text, type = "success") => {
+    const id = Math.random().toString(36).slice(2);
+    setToasts((t) => [...t, { id, text, type }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3200);
+  };
+
+  const updateKol = (id, patch, historyText) => {
+    setKols((list) =>
+      list.map((k) => {
+        if (k.id !== id) return k;
+        const next = { ...k, ...patch };
+        if (historyText) {
+          next.history = [...k.history, { time: now(), person: currentUser, text: historyText }];
+        }
+        return next;
+      })
+    );
+  };
+
+  const changeStatus = (id, target) => {
+    const k = kols.find((x) => x.id === id);
+    if (!k || k.status === target) return;
+    updateKol(id, { status: target }, `狀態變更：${k.status} → ${target}`);
+  };
+
+  const askConfirm = (cfg) => setConfirmBox(cfg);
+
+  const addKol = (data) => {
+    const seq = String(kols.length + 1).padStart(4, "0");
+    const id = `KOL-2026-${seq}`;
+    const record = {
+      id, name: data.name, platform: data.platform, url: data.url,
+      status: data.status, owner: data.owner, product: data.product,
+      scores: null, tracking: {}, perf: {},
+      history: [{ time: now(), person: currentUser, text: `建立名單，平台：${data.platform}` }],
+    };
+    setKols((l) => [...l, record]);
+    pushToast(`已新增 ${data.name}（${id}）`);
+  };
+
+  const resetData = () => {
+    askConfirm({
+      title: "還原預設資料",
+      message: "確定要清除目前所有資料並還原為預設範例嗎？此動作無法復原。",
+      danger: true, confirmText: "確認還原",
+      onConfirm: () => {
+        setKols(SEED);
+        setSelectedId(SEED[0].id);
+        pushToast("已還原預設資料", "info");
+      },
+    });
+  };
+
+  const TABS = [
+    { key: "list", label: "名單總表", icon: Users },
+    { key: "review", label: "審核評分", icon: Star },
+    { key: "track", label: "合作追蹤", icon: Send },
+    { key: "perf", label: "成效紀錄", icon: BarChart3 },
+    { key: "history", label: "歷史紀錄", icon: History },
+  ];
+
+  return (
+    <div className="min-h-screen w-full" style={{ background: C.bg, color: C.ink }}>
+      <style>{`
+        * { -webkit-font-smoothing: antialiased; }
+        ::-webkit-scrollbar{height:8px;width:8px}
+        ::-webkit-scrollbar-thumb{background:#CBD3DE;border-radius:8px}
+      `}</style>
+
+      {/* 頂部標題列 */}
+      <header className="border-b" style={{ background: C.card, borderColor: C.line }}>
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-5 py-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: C.navy }}>
+              <ClipboardList size={20} color="#fff" />
+            </div>
+            <h1 className="text-base font-bold leading-tight">空間特工 · KOL / KOC 審核管理</h1>
+          </div>
+
+          {/* 操作人員切換 + 角色權限 */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs" style={{ color: C.sub }}>操作人員</span>
+            <select
+              value={currentUser}
+              onChange={(e) => setCurrentUser(e.target.value)}
+              className="rounded-lg border bg-white px-2.5 py-1.5 text-sm outline-none"
+              style={{ borderColor: C.line }}
+            >
+              {Object.keys(USERS).map((u) => (
+                <option key={u} value={u}>{u}</option>
+              ))}
+            </select>
+            <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium" style={{ background: C.blueSoft, color: C.blue }}>
+              <ShieldCheck size={13} /> {me.role}
+            </span>
+            <GhostButton icon={RotateCcw} onClick={resetData}>還原範例</GhostButton>
+          </div>
+        </div>
+
+        {/* 權限摘要列 */}
+        <div className="border-t" style={{ borderColor: C.line, background: "#FAFBFD" }}>
+          <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-3 gap-y-1 px-5 py-2 text-xs" style={{ color: C.sub }}>
+            <span className="font-medium" style={{ color: C.ink }}>本帳號權限</span>
+            {Object.keys(PERM_LABEL).map((p) => (
+              <span key={p} className="inline-flex items-center gap-1">
+                {perms[p]
+                  ? <Check size={13} color="#4A7A4E" />
+                  : <X size={13} color="#B07A7A" />}
+                <span style={{ color: perms[p] ? C.ink : "#B0A0A0" }}>{PERM_LABEL[p]}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* Tab 導覽 */}
+        <div className="mx-auto max-w-6xl px-3">
+          <nav className="flex gap-1 overflow-x-auto">
+            {TABS.map((t) => {
+              const active = tab === t.key;
+              return (
+                <button
+                  key={t.key}
+                  onClick={() => setTab(t.key)}
+                  className="relative flex items-center gap-2 whitespace-nowrap px-4 py-3 text-sm font-medium transition-colors"
+                  style={{ color: active ? C.navy : C.sub }}
+                >
+                  <t.icon size={16} />
+                  {t.label}
+                  {active && <span className="absolute inset-x-2 -bottom-px h-0.5 rounded-full" style={{ background: C.navy }} />}
+                </button>
+              );
+            })}
+          </nav>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-6xl px-5 py-6">
+        {tab === "list" && (
+          <ListPage
+            kols={kols}
+            canAdd={perms.add}
+            canDelete={perms.delete}
+            onAdd={() => setShowAdd(true)}
+            onReview={(id) => { setSelectedId(id); setTab("review"); }}
+            onTrack={(id) => { setSelectedId(id); setTab("track"); }}
+            onDelete={(k) =>
+              askConfirm({
+                title: "刪除名單",
+                message: `確定要刪除「${k.name}」（${k.id}）嗎？此動作無法復原。`,
+                danger: true, confirmText: "確認刪除",
+                onConfirm: () => {
+                  setKols((l) => l.filter((x) => x.id !== k.id));
+                  pushToast(`已刪除 ${k.name}`, "info");
+                },
+              })
+            }
+            onAdvance={(k) => {
+              const idx = FLOW.indexOf(k.status);
+              const target = FLOW[Math.min(idx + 1, FLOW.length - 1)];
+              changeStatus(k.id, target);
+              pushToast(`${k.name} 狀態更新為「${target}」`);
+            }}
+          />
+        )}
+
+        {tab === "review" && (
+          <ReviewPage
+            kols={kols}
+            selected={selected}
+            setSelectedId={setSelectedId}
+            canReview={perms.review}
+            onSave={(id, scores) => {
+              const total = sumScores(scores);
+              const grade = gradeFromScore(total);
+              updateKol(id, { scores }, `儲存評分：${total} 分（${grade}）`);
+              if (kols.find((k) => k.id === id)?.status === "發現名單") changeStatus(id, "審核評分");
+              pushToast(`已儲存評分：${total} 分 · ${grade}`);
+            }}
+            onMarkReject={(k) =>
+              askConfirm({
+                title: "標記不合作",
+                message: `確定將「${k.name}」標記為不合作嗎？此名單會被歸入歷史紀錄。`,
+                danger: true, confirmText: "標記不合作",
+                onConfirm: () => {
+                  updateKol(k.id, {}, "標記為不合作");
+                  pushToast(`已標記 ${k.name} 為不合作`, "info");
+                },
+              })
+            }
+            pushToast={pushToast}
+          />
+        )}
+
+        {tab === "track" && (
+          <TrackPage
+            kols={kols} selected={selected} setSelectedId={setSelectedId}
+            canTrack={perms.track} updateKol={updateKol} changeStatus={changeStatus} pushToast={pushToast}
+          />
+        )}
+
+        {tab === "perf" && (
+          <PerfPage
+            kols={kols} selected={selected} setSelectedId={setSelectedId}
+            canPerf={perms.perf} updateKol={updateKol} changeStatus={changeStatus} pushToast={pushToast}
+          />
+        )}
+
+        {tab === "history" && <HistoryPage kols={kols} />}
+      </main>
+
+      {showAdd && <AddModal onClose={() => setShowAdd(false)} onSubmit={addKol} />}
+
+      {confirmBox && (
+        <ConfirmModal
+          {...confirmBox}
+          onCancel={() => setConfirmBox(null)}
+          onConfirm={() => { confirmBox.onConfirm(); setConfirmBox(null); }}
+        />
+      )}
+
+      <div className="fixed bottom-5 right-5 z-50 flex flex-col gap-2">
+        {toasts.map((t) => (
+          <div key={t.id} className="flex items-center gap-2 rounded-xl border px-4 py-3 text-sm shadow-lg"
+            style={{ background: "#fff", borderColor: C.line, minWidth: 220 }}>
+            <span className="flex h-6 w-6 items-center justify-center rounded-full"
+              style={{ background: t.type === "info" ? "#EAEFF6" : "#DEEEDF" }}>
+              <Check size={14} color={t.type === "info" ? C.blue : "#4A7A4E"} />
+            </span>
+            <span style={{ color: C.ink }}>{t.text}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   1) 名單總表
+   ============================================================ */
+function ListPage({ kols, canAdd, canDelete, onAdd, onReview, onTrack, onDelete, onAdvance }) {
+  const [q, setQ] = useState("");
+  const filtered = kols.filter(
+    (k) => k.name.includes(q) || k.id.includes(q) || k.owner.includes(q) || (k.product || "").includes(q)
+  );
+
+  return (
+    <div>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-bold">名單總表</h2>
+          <p className="text-sm" style={{ color: C.sub }}>集中留存所有 KOL / KOC，共 {kols.length} 筆</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <PrimaryButton icon={Plus} onClick={onAdd} disabled={!canAdd}>新增 KOL / KOC</PrimaryButton>
+          <PermHint show={!canAdd}>此帳號無新增權限</PermHint>
+        </div>
+      </div>
+
+      <div className="mb-3 flex items-center gap-2 rounded-lg border bg-white px-3 py-2" style={{ borderColor: C.line, maxWidth: 320 }}>
+        <Search size={16} color={C.sub} />
+        <input value={q} onChange={(e) => setQ(e.target.value)}
+          placeholder="搜尋名字 / ID / 負責人 / 產品" className="w-full bg-transparent text-sm outline-none" />
+      </div>
+
+      <div className="overflow-hidden rounded-xl border bg-white" style={{ borderColor: C.line }}>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ background: "#FAFBFD", color: C.sub }}>
+                {["ID", "名字", "平台", "目前狀態", "負責人", "合作產品", "操作"].map((h) => (
+                  <th key={h} className="whitespace-nowrap px-4 py-3 text-left font-semibold">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((k) => (
+                <tr key={k.id} className="border-t" style={{ borderColor: C.line }}>
+                  <td className="whitespace-nowrap px-4 py-3 font-mono text-xs" style={{ color: C.sub }}>{k.id}</td>
+                  <td className="px-4 py-3 font-medium">{k.name}</td>
+                  <td className="px-4 py-3">
+                    <a href={k.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:underline" style={{ color: C.blue }}>
+                      {k.platform} <ExternalLink size={12} />
+                    </a>
+                  </td>
+                  <td className="px-4 py-3"><StatusTag status={k.status} /></td>
+                  <td className="whitespace-nowrap px-4 py-3">{k.owner}</td>
+                  <td className="px-4 py-3" style={{ color: k.product ? C.ink : C.sub }}>{k.product || "—"}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      {k.status === "發現名單" || k.status === "審核評分" ? (
+                        <GhostButton icon={Star} onClick={() => onReview(k.id)}>開始審核</GhostButton>
+                      ) : (
+                        <GhostButton icon={ChevronRight} onClick={() => onAdvance(k)}>更新狀態</GhostButton>
+                      )}
+                      <button
+                        onClick={canDelete ? () => onDelete(k) : undefined}
+                        disabled={!canDelete}
+                        className="rounded-lg border p-2 transition-colors hover:opacity-70"
+                        style={{ borderColor: "#E8D6D6", color: "#A85A5A", opacity: canDelete ? 1 : 0.4, cursor: canDelete ? "pointer" : "not-allowed" }}
+                        title={canDelete ? "刪除名單" : "此帳號無刪除權限"}
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {filtered.length === 0 && (
+                <tr><td colSpan={7} className="px-4 py-10 text-center" style={{ color: C.sub }}>找不到符合的名單，換個關鍵字試試。</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* 選擇對象的下拉 */
+function KolPicker({ kols, selected, setSelectedId, filterFn, label }) {
+  const list = filterFn ? kols.filter(filterFn) : kols;
+  return (
+    <div className="mb-5 flex flex-wrap items-center gap-2">
+      <span className="text-sm font-medium" style={{ color: C.sub }}>{label}</span>
+      <select value={selected?.id || ""} onChange={(e) => setSelectedId(e.target.value)}
+        className="rounded-lg border bg-white px-3 py-2 text-sm outline-none" style={{ borderColor: C.line, minWidth: 240 }}>
+        {list.map((k) => <option key={k.id} value={k.id}>{k.name} · {k.id}（{k.status}）</option>)}
+      </select>
+    </div>
+  );
+}
+
+/* ============================================================
+   2) 審核評分
+   ============================================================ */
+function ReviewPage({ kols, selected, setSelectedId, canReview, onSave, onMarkReject, pushToast }) {
+  const [scores, setScores] = useState(() => seedScores(selected));
+  const [loading, setLoading] = useState(false);
+  const [advice, setAdvice] = useState("");
+  const [lastId, setLastId] = useState(selected?.id);
+
+  if (selected && selected.id !== lastId) {
+    setLastId(selected.id);
+    setScores(seedScores(selected));
+    setAdvice("");
+  }
+
+  const total = sumScores(scores);
+  const filledAll = DIMENSIONS.every((d) => scores[d.key] > 0);
+  const grade = gradeFromScore(total);
+
+  const handleSave = () => {
+    setLoading(true);
+    setTimeout(() => { setLoading(false); onSave(selected.id, scores); }, 800);
+  };
+
+  const genAdvice = () => {
+    const weak = DIMENSIONS.filter((d) => scores[d.key] <= 2).map((d) => d.label);
+    const strong = DIMENSIONS.filter((d) => scores[d.key] >= 4).map((d) => d.label);
+    let text = `總分 ${total} 分，判定為「${grade}」。`;
+    if (grade === "優先合作") text += "建議直接進入接洽，安排寄樣與檔期。";
+    else if (grade === "可合作") text += "可納入候補名單，視預算與檔期接洽。";
+    else if (grade === "可觀察") text += "暫不主動接洽，持續觀察內容與互動表現。";
+    else text += "不建議投入資源，建議標記不合作或歸檔。";
+    if (strong.length) text += `\n優勢面向：${strong.join("、")}。`;
+    if (weak.length) text += `\n需留意：${weak.join("、")}，建議洽談前再確認。`;
+    setAdvice(text);
+    pushToast("已產生合作建議");
+  };
+
+  return (
+    <div>
+      <h2 className="mb-1 text-lg font-bold">審核評分</h2>
+      <p className="mb-4 text-sm" style={{ color: C.sub }}>8 大維度各 1–5 分，系統依總分（滿分 40）自動判定合作等級。</p>
+
+      <KolPicker kols={kols} selected={selected} setSelectedId={setSelectedId} label="評分對象" />
+
+      <div className="grid gap-5 lg:grid-cols-3">
+        <div className="lg:col-span-2 rounded-xl border bg-white p-5" style={{ borderColor: C.line }}>
+          <div className="space-y-4">
+            {DIMENSIONS.map((d) => (
+              <div key={d.key} className="flex flex-wrap items-center justify-between gap-3 border-b pb-4 last:border-0 last:pb-0" style={{ borderColor: C.line }}>
+                <div className="min-w-0">
+                  <div className="font-medium">{d.label}</div>
+                  <div className="text-xs" style={{ color: C.sub }}>{d.hint}</div>
+                </div>
+                <div className="flex gap-1.5">
+                  {[1, 2, 3, 4, 5].map((n) => {
+                    const on = scores[d.key] === n;
+                    return (
+                      <button key={n} onClick={() => setScores((s) => ({ ...s, [d.key]: n }))}
+                        className="flex h-9 w-9 items-center justify-center rounded-lg border text-sm font-semibold transition-all"
+                        style={{ background: on ? C.navy : "#fff", color: on ? "#fff" : C.sub, borderColor: on ? C.navy : C.line }}>
+                        {n}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="rounded-xl border bg-white p-5 text-center" style={{ borderColor: C.line }}>
+            <div className="text-sm" style={{ color: C.sub }}>目前總分</div>
+            <div className="my-1 text-4xl font-bold" style={{ color: C.navy }}>
+              {total}<span className="text-lg" style={{ color: C.sub }}> / 40</span>
+            </div>
+            <div className="mb-3 flex justify-center"><GradeTag grade={filledAll ? grade : null} /></div>
+            <div className="text-xs" style={{ color: C.sub }}>
+              {filledAll ? "已完成 8 項評分" : `尚有 ${DIMENSIONS.filter((d) => !scores[d.key]).length} 項未評`}
+            </div>
+          </div>
+
+          {advice && (
+            <div className="rounded-xl border p-4 text-sm" style={{ borderColor: C.line, background: "#FAFBFD" }}>
+              <div className="mb-1 flex items-center gap-1.5 font-semibold" style={{ color: C.navy }}><Sparkles size={15} /> 合作建議</div>
+              <p className="whitespace-pre-line leading-relaxed" style={{ color: C.ink }}>{advice}</p>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <PrimaryButton icon={Check} onClick={handleSave} loading={loading} disabled={!filledAll || !canReview}>儲存評分</PrimaryButton>
+            {!canReview && <PermHint show>此帳號無審核權限，無法儲存或標記。</PermHint>}
+            {canReview && !filledAll && <PermHint show>請完成全部 8 項評分後才能儲存。</PermHint>}
+            <div className="flex flex-wrap gap-2 pt-1">
+              <GhostButton icon={Sparkles} onClick={genAdvice}>產生建議</GhostButton>
+              <GhostButton icon={AlertTriangle} tone="danger" disabled={!canReview} onClick={() => onMarkReject(selected)}>標記不合作</GhostButton>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function seedScores(k) {
+  const base = {};
+  DIMENSIONS.forEach((d) => (base[d.key] = k?.scores?.[d.key] || 0));
+  return base;
+}
+
+/* ============================================================
+   3) 合作追蹤
+   ============================================================ */
+function TrackPage({ kols, selected, setSelectedId, canTrack, updateKol, changeStatus, pushToast }) {
+  const inProgress = kols.filter((k) => ["接洽合作", "發布追蹤"].includes(k.status));
+  const target = inProgress.includes(selected) ? selected : inProgress[0];
+
+  if (!target) {
+    return <Empty title="目前沒有進行中的合作案" desc="當名單進入「接洽合作」或「發布追蹤」狀態，會出現在這裡。先到名單總表更新狀態吧。" />;
+  }
+
+  return (
+    <div>
+      <h2 className="mb-1 text-lg font-bold">合作追蹤</h2>
+      <p className="mb-4 text-sm" style={{ color: C.sub }}>追蹤接洽中與發布中的案件，共 {inProgress.length} 件。</p>
+
+      <KolPicker kols={kols} selected={target} setSelectedId={setSelectedId}
+        filterFn={(k) => ["接洽合作", "發布追蹤"].includes(k.status)} label="追蹤案件" />
+
+      <div className="grid gap-5 lg:grid-cols-5">
+        <div className="lg:col-span-2"><CaseCard k={target} /></div>
+        <div className="lg:col-span-3">
+          <TrackForm k={target} canTrack={canTrack} updateKol={updateKol} changeStatus={changeStatus} pushToast={pushToast} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CaseCard({ k }) {
+  return (
+    <div className="rounded-xl border bg-white p-5" style={{ borderColor: C.line }}>
+      <div className="mb-3 flex items-center justify-between">
+        <span className="font-mono text-xs" style={{ color: C.sub }}>{k.id}</span>
+        <StatusTag status={k.status} />
+      </div>
+      <div className="text-lg font-bold">{k.name}</div>
+      <a href={k.url} target="_blank" rel="noreferrer" className="text-sm hover:underline" style={{ color: C.blue }}>{k.platform}</a>
+      <dl className="mt-4 space-y-2 text-sm">
+        <Row label="負責人" value={k.owner} />
+        <Row label="合作產品" value={k.product || "—"} />
+        <Row label="評分等級" value={<GradeTag grade={k.scores ? gradeFromScore(sumScores(k.scores)) : null} />} />
+      </dl>
+    </div>
+  );
+}
+
+function Row({ label, value }) {
+  return (
+    <div className="flex items-center justify-between">
+      <dt style={{ color: C.sub }}>{label}</dt>
+      <dd className="font-medium">{value}</dd>
+    </div>
+  );
+}
+
+function TrackForm({ k, canTrack, updateKol, changeStatus, pushToast }) {
+  const [shipping, setShipping] = useState(k.tracking?.shipping || "");
+  const [task, setTask] = useState(k.tracking?.task || "");
+  const [publishUrl, setPublishUrl] = useState(k.tracking?.publishUrl || "");
+  const [reminder, setReminder] = useState(k.tracking?.reminder || "");
+  const [loading, setLoading] = useState(false);
+  const [lastId, setLastId] = useState(k.id);
+
+  if (k.id !== lastId) {
+    setLastId(k.id);
+    setShipping(k.tracking?.shipping || ""); setTask(k.tracking?.task || "");
+    setPublishUrl(k.tracking?.publishUrl || ""); setReminder(k.tracking?.reminder || "");
+  }
+
+  const canSubmit = shipping.trim() && task.trim();
+
+  const save = () => {
+    setLoading(true);
+    setTimeout(() => {
+      setLoading(false);
+      updateKol(k.id, { tracking: { shipping, task, publishUrl, reminder } },
+        publishUrl ? "更新追蹤資料並回填發布連結" : "更新合作追蹤資料");
+      if (publishUrl && k.status === "接洽合作") changeStatus(k.id, "發布追蹤");
+      pushToast("已儲存追蹤資料");
+    }, 800);
+  };
+
+  return (
+    <div className="rounded-xl border bg-white p-5" style={{ borderColor: C.line }}>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="填寄送資料" required hint="出貨方式 / 物流單號">
+          <input className={inputCls} style={{ borderColor: C.line }} value={shipping} onChange={(e) => setShipping(e.target.value)} placeholder="例：黑貓宅配 6512-xxxx" />
+        </Field>
+        <Field label="新增發布任務" required hint="本次合作要產出的內容">
+          <input className={inputCls} style={{ borderColor: C.line }} value={task} onChange={(e) => setTask(e.target.value)} placeholder="例：開箱影片 + 限時動態" />
+        </Field>
+        <Field label="回填發布連結" hint="內容上線後填入，將自動推進到「發布追蹤」">
+          <input className={inputCls} style={{ borderColor: C.line }} value={publishUrl} onChange={(e) => setPublishUrl(e.target.value)} placeholder="https://…" />
+        </Field>
+        <Field label="建立補件提醒" hint="尚缺素材或文件時的追件備註">
+          <input className={inputCls} style={{ borderColor: C.line }} value={reminder} onChange={(e) => setReminder(e.target.value)} placeholder="例：6/15 前提醒補授權圖" />
+        </Field>
+      </div>
+
+      <div className="mt-5 flex flex-wrap items-center gap-3">
+        <PrimaryButton icon={Send} onClick={save} loading={loading} disabled={!canSubmit || !canTrack}>儲存追蹤資料</PrimaryButton>
+        <PermHint show={!canTrack}>此帳號無合作追蹤權限。</PermHint>
+        <PermHint show={canTrack && !canSubmit}>請先填寫「寄送資料」與「發布任務」。</PermHint>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   4) 成效紀錄（依平台顯示不同欄位）
+   ============================================================ */
+function PerfPage({ kols, selected, setSelectedId, canPerf, updateKol, changeStatus, pushToast }) {
+  const list = kols.filter((k) => ["發布追蹤", "成效回收", "再開發"].includes(k.status));
+  const target = list.includes(selected) ? selected : list[0];
+
+  if (!target) {
+    return <Empty title="尚無可回收成效的案件" desc="當案件進入「發布追蹤」之後，即可在此回填成效數據。" />;
+  }
+
+  return (
+    <div>
+      <h2 className="mb-1 text-lg font-bold">成效紀錄</h2>
+      <p className="mb-4 text-sm" style={{ color: C.sub }}>系統依合作平台顯示對應的成效欄位，計算成本並產生摘要。</p>
+
+      <KolPicker kols={kols} selected={target} setSelectedId={setSelectedId}
+        filterFn={(k) => ["發布追蹤", "成效回收", "再開發"].includes(k.status)} label="成效對象" />
+
+      <PerfForm key={target.id} k={target} canPerf={canPerf} updateKol={updateKol} changeStatus={changeStatus} pushToast={pushToast} />
+    </div>
+  );
+}
+
+function PerfForm({ k, canPerf, updateKol, changeStatus, pushToast }) {
+  const cfg = perfCfg(k.platform);
+  const initValues = () => {
+    const v = {};
+    cfg.fields.forEach((f) => (v[f.key] = k.perf?.[f.key] || ""));
+    return v;
+  };
+  const [values, setValues] = useState(initValues);
+  const [cost, setCost] = useState(k.perf?.cost || "");
+  const [summary, setSummary] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const num = (v) => parseFloat(String(v).replace(/,/g, "")) || 0;
+  const setVal = (key) => (e) => setValues((s) => ({ ...s, [key]: e.target.value }));
+
+  const baseV = num(values[cfg.base]);
+  const clicksV = num(values[cfg.clicks]);
+  const engageV = cfg.engage ? num(values[cfg.engage]) : null;
+  const salesV = num(values[cfg.sales]);
+
+  const canSubmit = cfg.fields.filter((f) => f.req).every((f) => String(values[f.key]).trim());
+  const ctr = baseV > 0 ? ((clicksV / baseV) * 100).toFixed(2) : "—";
+  const engRate = engageV != null && baseV > 0 ? ((engageV / baseV) * 100).toFixed(2) : "—";
+  const roi = num(cost) > 0 ? (salesV / num(cost)).toFixed(2) : "—";
+
+  const save = () => {
+    setLoading(true);
+    setTimeout(() => {
+      setLoading(false);
+      updateKol(k.id, { perf: { ...values, cost } }, `回填 ${k.platform} 成效數據`);
+      if (k.status === "發布追蹤") changeStatus(k.id, "成效回收");
+      pushToast("已回填成效數據");
+    }, 800);
+  };
+
+  const calcCost = () => {
+    if (!cost) { pushToast("請先填入合作成本", "info"); return; }
+    pushToast(roi === "—" ? "尚無成交金額可計算" : `ROI ${roi}：每 1 元成本帶回 ${roi} 元成交`);
+  };
+
+  const genSummary = () => {
+    const parts = cfg.fields.filter((f) => String(values[f.key]).trim())
+      .map((f) => `${f.label} ${f.money ? "NT$" : ""}${values[f.key]}`);
+    setSummary(
+      `${k.name}（${k.platform} · ${k.product || "未指定產品"}）成效摘要：\n` +
+      (parts.length ? parts.join("、") + "。\n" : "") +
+      `點擊率 CTR ${ctr}%${engRate !== "—" ? `、互動率 ${engRate}%` : ""}、ROI ${roi}（成本 NT$${cost || "未填"}）。`
+    );
+    pushToast("已產生成效摘要");
+  };
+
+  const markRecoop = () => {
+    changeStatus(k.id, "再開發");
+    pushToast(`${k.name} 已標記為再合作 / 再開發`);
+  };
+
+  return (
+    <div className="grid gap-5 lg:grid-cols-3">
+      <div className="lg:col-span-2 rounded-xl border bg-white p-5" style={{ borderColor: C.line }}>
+        <div className="mb-4 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium" style={{ background: C.blueSoft, color: C.blue }}>
+          <BarChart3 size={13} /> {k.platform} 專屬成效欄位
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          {cfg.fields.map((f) => (
+            <Field key={f.key} label={f.label} required={f.req} hint={f.hint || (f.money ? "選填" : undefined)}>
+              <input className={inputCls} style={{ borderColor: C.line }} value={values[f.key]}
+                onChange={setVal(f.key)} placeholder={f.money ? "NT$" : "請輸入數字"} />
+            </Field>
+          ))}
+          <Field label="合作成本" hint="供計算 ROI（選填）">
+            <input className={inputCls} style={{ borderColor: C.line }} value={cost}
+              onChange={(e) => setCost(e.target.value)} placeholder="NT$（稿酬 + 贈品成本）" />
+          </Field>
+        </div>
+
+        {summary && (
+          <div className="mt-4 rounded-lg border p-4 text-sm" style={{ borderColor: C.line, background: "#FAFBFD" }}>
+            <div className="mb-1 flex items-center gap-1.5 font-semibold" style={{ color: C.navy }}><FileText size={15} /> 成效摘要</div>
+            <p className="whitespace-pre-line leading-relaxed">{summary}</p>
+          </div>
+        )}
+
+        <div className="mt-5 flex flex-wrap items-center gap-3">
+          <PrimaryButton icon={Check} onClick={save} loading={loading} disabled={!canSubmit || !canPerf}>回填數據</PrimaryButton>
+          <GhostButton icon={Calculator} onClick={calcCost}>計算成本</GhostButton>
+          <GhostButton icon={FileText} onClick={genSummary}>產生成效摘要</GhostButton>
+          <GhostButton icon={RotateCcw} disabled={!canPerf} onClick={markRecoop}>標記再合作</GhostButton>
+        </div>
+        <div className="mt-2">
+          <PermHint show={!canPerf}>此帳號無成效回填權限。</PermHint>
+          <PermHint show={canPerf && !canSubmit}>請填寫標示為必填的「{cfg.baseLabel}」與點擊欄位。</PermHint>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <Metric label="點擊率 CTR" value={ctr === "—" ? "—" : `${ctr}%`} icon={TrendingUp} />
+        {cfg.engage && <Metric label="互動率" value={engRate === "—" ? "—" : `${engRate}%`} icon={BarChart3} />}
+        <Metric label="ROI（成交 / 成本）" value={roi} icon={Calculator} />
+      </div>
+    </div>
+  );
+}
+
+function Metric({ label, value, icon: Icon }) {
+  return (
+    <div className="flex items-center justify-between rounded-xl border bg-white p-4" style={{ borderColor: C.line }}>
+      <div className="flex items-center gap-2">
+        <span className="flex h-9 w-9 items-center justify-center rounded-lg" style={{ background: C.blueSoft }}>
+          <Icon size={17} color={C.blue} />
+        </span>
+        <span className="text-sm" style={{ color: C.sub }}>{label}</span>
+      </div>
+      <span className="text-lg font-bold" style={{ color: C.navy }}>{value}</span>
+    </div>
+  );
+}
+
+/* ============================================================
+   5) 歷史紀錄
+   ============================================================ */
+function HistoryPage({ kols }) {
+  const [filter, setFilter] = useState("all");
+  const list = filter === "all" ? kols : kols.filter((k) => k.id === filter);
+
+  return (
+    <div>
+      <h2 className="mb-1 text-lg font-bold">歷史紀錄</h2>
+      <p className="mb-4 text-sm" style={{ color: C.sub }}>保留每一次狀態切換、接洽與再開發的時間軸，方便交接與回溯。</p>
+
+      <div className="mb-5">
+        <select value={filter} onChange={(e) => setFilter(e.target.value)}
+          className="rounded-lg border bg-white px-3 py-2 text-sm outline-none" style={{ borderColor: C.line }}>
+          <option value="all">全部名單</option>
+          {kols.map((k) => <option key={k.id} value={k.id}>{k.name} · {k.id}</option>)}
+        </select>
+      </div>
+
+      <div className="space-y-5">
+        {list.map((k) => (
+          <div key={k.id} className="rounded-xl border bg-white p-5" style={{ borderColor: C.line }}>
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <span className="font-mono text-xs" style={{ color: C.sub }}>{k.id}</span>
+              <span className="font-bold">{k.name}</span>
+              <StatusTag status={k.status} />
+            </div>
+            <ol className="relative ml-2 border-l-2 pl-5" style={{ borderColor: C.line }}>
+              {[...k.history].reverse().map((h, i) => (
+                <li key={i} className="relative mb-4 last:mb-0">
+                  <span className="absolute -left-[27px] top-1 h-3 w-3 rounded-full border-2 bg-white" style={{ borderColor: i === 0 ? C.navy : "#C5CEDB" }} />
+                  <div className="text-sm font-medium">{h.text}</div>
+                  <div className="text-xs" style={{ color: C.sub }}>{h.time} · {h.person}</div>
+                </li>
+              ))}
+            </ol>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Empty({ title, desc }) {
+  return (
+    <div className="rounded-xl border bg-white p-12 text-center" style={{ borderColor: C.line }}>
+      <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full" style={{ background: C.blueSoft }}>
+        <Package size={22} color={C.blue} />
+      </div>
+      <div className="font-semibold">{title}</div>
+      <p className="mx-auto mt-1 max-w-md text-sm" style={{ color: C.sub }}>{desc}</p>
+    </div>
+  );
+}
+
+/* ============================================================
+   新增 KOL Modal（合作產品改為選填）
+   ============================================================ */
+function AddModal({ onClose, onSubmit }) {
+  const [form, setForm] = useState({ name: "", platform: "Instagram", url: "", status: "發現名單", owner: "", product: "" });
+  const [loading, setLoading] = useState(false);
+  const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+
+  const missing = [];
+  if (!form.name.trim()) missing.push("名字");
+  if (!form.url.trim()) missing.push("平台連結");
+  if (!form.owner.trim()) missing.push("負責人");
+  const canSubmit = missing.length === 0;
+
+  const submit = () => {
+    if (!canSubmit) return;
+    setLoading(true);
+    setTimeout(() => { setLoading(false); onSubmit(form); onClose(); }, 800);
+  };
+
+  return (
+    <Overlay onClose={onClose}>
+      <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-base font-bold">新增 KOL / KOC</h3>
+          <button onClick={onClose} className="rounded-lg p-1 hover:bg-slate-100"><X size={18} color={C.sub} /></button>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="名字" required>
+            <input className={inputCls} style={{ borderColor: C.line }} value={form.name} onChange={set("name")} placeholder="帳號 / 名稱" />
+          </Field>
+          <Field label="平台">
+            <select className={inputCls} style={{ borderColor: C.line }} value={form.platform} onChange={set("platform")}>
+              {Object.keys(PLATFORM_PERF).map((p) => <option key={p}>{p}</option>)}
+            </select>
+          </Field>
+          <div className="sm:col-span-2">
+            <Field label="平台連結" required>
+              <input className={inputCls} style={{ borderColor: C.line }} value={form.url} onChange={set("url")} placeholder="https://…" />
+            </Field>
+          </div>
+          <Field label="目前狀態" required>
+            <select className={inputCls} style={{ borderColor: C.line }} value={form.status} onChange={set("status")}>
+              {FLOW.map((s) => <option key={s}>{s}</option>)}
+            </select>
+          </Field>
+          <Field label="負責人" required>
+            <input className={inputCls} style={{ borderColor: C.line }} value={form.owner} onChange={set("owner")} placeholder="例：林佩珊" />
+          </Field>
+          <div className="sm:col-span-2">
+            <Field label="合作產品" hint="選填，可於審核或接洽階段再補">
+              <input className={inputCls} style={{ borderColor: C.line }} value={form.product} onChange={set("product")} placeholder="例：系統收納櫃 SC-200" />
+            </Field>
+          </div>
+        </div>
+
+        <div className="mt-6 flex items-center justify-between gap-3">
+          <span className="text-xs" style={{ color: missing.length ? "#B0764B" : C.sub }}>
+            {missing.length ? `尚未填寫：${missing.join("、")}` : "必填資料已齊全，可建立名單"}
+          </span>
+          <PrimaryButton icon={Plus} onClick={submit} loading={loading} disabled={!canSubmit}>建立名單</PrimaryButton>
+        </div>
+      </div>
+    </Overlay>
+  );
+}
+
+function ConfirmModal({ title, message, danger, confirmText, onCancel, onConfirm }) {
+  return (
+    <Overlay onClose={onCancel}>
+      <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
+        <div className="mb-3 flex items-center gap-3">
+          <span className="flex h-10 w-10 items-center justify-center rounded-full" style={{ background: danger ? "#FBECEC" : C.blueSoft }}>
+            <AlertTriangle size={20} color={danger ? "#B85A5A" : C.blue} />
+          </span>
+          <h3 className="text-base font-bold">{title}</h3>
+        </div>
+        <p className="mb-6 text-sm leading-relaxed" style={{ color: C.sub }}>{message}</p>
+        <div className="flex justify-end gap-2">
+          <GhostButton onClick={onCancel}>取消</GhostButton>
+          <button onClick={onConfirm} className="rounded-lg px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:opacity-90" style={{ background: danger ? "#B85A5A" : C.navy }}>
+            {confirmText || "確認"}
+          </button>
+        </div>
+      </div>
+    </Overlay>
+  );
+}
+
+function Overlay({ children, onClose }) {
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(31,48,71,0.45)" }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()}>{children}</div>
+    </div>
+  );
+}
+
+createRoot(document.getElementById("root")).render(<KolManager />);
+</script>
+</body>
+</html>
