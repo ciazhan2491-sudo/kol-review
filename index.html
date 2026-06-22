@@ -5,29 +5,56 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>空間特工 · KOL / KOC 審核管理</title>
 <script src="https://cdn.tailwindcss.com"></script>
-<script type="importmap">
-{
-  "imports": {
-    "react": "https://esm.sh/react@18.2.0",
-    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client?deps=react@18.2.0",
-    "lucide-react": "https://esm.sh/lucide-react@0.257.0?deps=react@18.2.0"
-  }
-}
-</script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script crossorigin src="https://unpkg.com/react@18.2.0/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/lucide@0.257.0/dist/umd/lucide.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
 <style>html,body,#root{height:100%}</style>
 </head>
 <body>
 <div id="root"></div>
 
-<script type="text/babel" data-type="module" data-presets="react">
-import React, { useState, useEffect } from "react";
-import { createRoot } from "react-dom/client";
-import {
-  Users, Star, Send, BarChart3, History, Plus, X, Check, AlertTriangle,
-  Trash2, ExternalLink, Search, ChevronRight, Loader2, Package,
-  TrendingUp, Calculator, FileText, RotateCcw, Sparkles, ClipboardList, ShieldCheck,
-} from "lucide-react";
+<script type="text/babel" data-presets="react">
+/* ---- 從 UMD 全域取出 React / ReactDOM ---- */
+const { useState, useEffect } = React;
+const { createRoot } = ReactDOM;
+
+/* ---- lucide 圖示轉接：把 window.lucide 的 SVG 節點包成 React 元件 ---- */
+const _LUCIDE = window.lucide || {};
+function _mkIcon(node) {
+  return function Icon({ size = 24, color = "currentColor", className, style, ...rest }) {
+    if (!node) return null;
+    const attrs = node[1] || {};
+    const children = node[2] || [];
+    return React.createElement(
+      "svg",
+      { ...attrs, width: size, height: size, stroke: color, className, style, ...rest },
+      children.map((c, i) => React.createElement(c[0], { key: i, ...(c[1] || {}) }))
+    );
+  };
+}
+const Users = _mkIcon(_LUCIDE.Users);
+const Star = _mkIcon(_LUCIDE.Star);
+const Send = _mkIcon(_LUCIDE.Send);
+const BarChart3 = _mkIcon(_LUCIDE.BarChart3);
+const History = _mkIcon(_LUCIDE.History);
+const Plus = _mkIcon(_LUCIDE.Plus);
+const X = _mkIcon(_LUCIDE.X);
+const Check = _mkIcon(_LUCIDE.Check);
+const AlertTriangle = _mkIcon(_LUCIDE.AlertTriangle);
+const Trash2 = _mkIcon(_LUCIDE.Trash2);
+const ExternalLink = _mkIcon(_LUCIDE.ExternalLink);
+const Search = _mkIcon(_LUCIDE.Search);
+const ChevronRight = _mkIcon(_LUCIDE.ChevronRight);
+const Loader2 = _mkIcon(_LUCIDE.Loader2);
+const Package = _mkIcon(_LUCIDE.Package);
+const TrendingUp = _mkIcon(_LUCIDE.TrendingUp);
+const Calculator = _mkIcon(_LUCIDE.Calculator);
+const FileText = _mkIcon(_LUCIDE.FileText);
+const RotateCcw = _mkIcon(_LUCIDE.RotateCcw);
+const Sparkles = _mkIcon(_LUCIDE.Sparkles);
+const ClipboardList = _mkIcon(_LUCIDE.ClipboardList);
+const ShieldCheck = _mkIcon(_LUCIDE.ShieldCheck);
 
 /* ============================================================
    品牌色票 — 乾淨的白 / 灰 / 深藍（Blue Fusion 質感藍）
@@ -90,8 +117,6 @@ const DIMENSIONS = [
 
 /* ============================================================
    依平台顯示不同的成效欄位
-   base = 觸及/曝光類分母；clicks = 點擊；engage = 互動分子；sales = 成交
-   req 為必填（折扣碼成交金額不必填）
    ============================================================ */
 const PLATFORM_PERF = {
   Instagram: {
@@ -175,7 +200,7 @@ const sumScores = (s) =>
   s ? DIMENSIONS.reduce((a, d) => a + (s[d.key] || 0), 0) : 0;
 
 /* ============================================================
-   預設測試資料 — 空間特工品牌調性
+   預設測試資料
    ============================================================ */
 const SEED = [
   {
@@ -277,7 +302,6 @@ function GradeTag({ grade }) {
   return <Tag palette={GRADE_TAG[grade]}>{grade}</Tag>;
 }
 
-/* 主色調按鈕（單一主按鈕原則 + 防重複送出） */
 function PrimaryButton({ children, onClick, disabled, loading, icon: Icon }) {
   return (
     <button
@@ -425,7 +449,6 @@ function KolManager() {
         ::-webkit-scrollbar-thumb{background:#CBD3DE;border-radius:8px}
       `}</style>
 
-      {/* 頂部標題列 */}
       <header className="border-b" style={{ background: C.card, borderColor: C.line }}>
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-5 py-4">
           <div className="flex items-center gap-3">
@@ -435,7 +458,6 @@ function KolManager() {
             <h1 className="text-base font-bold leading-tight">空間特工 · KOL / KOC 審核管理</h1>
           </div>
 
-          {/* 操作人員切換 + 角色權限 */}
           <div className="flex items-center gap-2">
             <span className="text-xs" style={{ color: C.sub }}>操作人員</span>
             <select
@@ -455,7 +477,6 @@ function KolManager() {
           </div>
         </div>
 
-        {/* 權限摘要列 */}
         <div className="border-t" style={{ borderColor: C.line, background: "#FAFBFD" }}>
           <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-3 gap-y-1 px-5 py-2 text-xs" style={{ color: C.sub }}>
             <span className="font-medium" style={{ color: C.ink }}>本帳號權限</span>
@@ -470,7 +491,6 @@ function KolManager() {
           </div>
         </div>
 
-        {/* Tab 導覽 */}
         <div className="mx-auto max-w-6xl px-3">
           <nav className="flex gap-1 overflow-x-auto">
             {TABS.map((t) => {
@@ -674,7 +694,6 @@ function ListPage({ kols, canAdd, canDelete, onAdd, onReview, onTrack, onDelete,
   );
 }
 
-/* 選擇對象的下拉 */
 function KolPicker({ kols, selected, setSelectedId, filterFn, label }) {
   const list = filterFn ? kols.filter(filterFn) : kols;
   return (
@@ -1107,7 +1126,7 @@ function Empty({ title, desc }) {
 }
 
 /* ============================================================
-   新增 KOL Modal（合作產品改為選填）
+   新增 KOL Modal
    ============================================================ */
 function AddModal({ onClose, onSubmit }) {
   const [form, setForm] = useState({ name: "", platform: "Instagram", url: "", status: "發現名單", owner: "", product: "" });
